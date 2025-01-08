@@ -11,8 +11,10 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import Annotated
 
+
 import tzlocal
 from apscheduler.schedulers.background import BackgroundScheduler
+from apecheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.cron.fields import BaseField
 from fastapi import Depends, FastAPI, Response
@@ -32,6 +34,11 @@ from timelength import TimeLength
 
 # Imported here to register environment variables before importing store (only for local dev purposes)
 import store
+from store import database_path
+
+sqlite_url = f"sqlite:///{database_path}"
+
+
 
 
 class LLMException(Exception):
@@ -92,7 +99,12 @@ MAX_WORDS = int(PROMPT_WINDOW // 1.5)
 MAX_CHARACTERS = MAX_WORDS * 5
 
 
-scheduler = BackgroundScheduler()
+
+jobstores= {
+    'default':SQLAlchemyJobStore(url=sqlite_url)
+}
+
+scheduler = BackgroundScheduler(jobstores=jobstores)
 scheduler.start()
 
 # We need to use ThreadPoolExecutor for message store and taskproc API calls
