@@ -1,6 +1,10 @@
-# Summary Bot
+<!--
+  - SPDX-FileCopyrightText: 2024 Nextcloud GmbH and Nextcloud contributors
+  - SPDX-License-Identifier: AGPL-3.0-or-later
+-->
+# Summary Bot - AI Talk chat summarize bot
 
-Summary Bot - AI Talk chat summarize bot
+[![REUSE status](https://api.reuse.software/badge/github.com/nextcloud/summary_bot)](https://api.reuse.software/info/github.com/nextcloud/summary_bot)
 
 Summary Bot is an innovative chat bot designed to enhance communication efficiency within the Nextcloud platform. This bot integrates seamlessly with Nextcloud&#x27;s chat feature, providing users with concise summaries of their conversations.
 

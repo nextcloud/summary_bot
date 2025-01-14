@@ -1,5 +1,10 @@
 """SQLite Chat Message Store"""
 
+#
+# SPDX-FileCopyrightText: 2024 Nextcloud GmbH and Nextcloud contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+
 import os
 
 from nc_py_api.ex_app import persistent_storage
