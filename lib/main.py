@@ -16,10 +16,9 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import Annotated
 
-
 import tzlocal
+from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.background import BackgroundScheduler
-from apecheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.cron.fields import BaseField
 from fastapi import Depends, FastAPI, Response
@@ -37,13 +36,12 @@ from timelength import TimeLength
 # os.environ["NEXTCLOUD_URL"] = "http://nextcloud.local"
 # os.environ["APP_PERSISTENT_STORAGE"] = "/tmp/"
 
+# isort: off
 # Imported here to register environment variables before importing store (only for local dev purposes)
 import store
 from store import database_path
 
-sqlite_url = f"sqlite:///{database_path}"
-
-
+SQLITE_URI = f"sqlite:///{database_path}"
 
 
 class LLMException(Exception):
@@ -59,10 +57,11 @@ logger = logging.getLogger(os.environ["APP_ID"])
 logger.setLevel(logging.DEBUG)
 setup_nextcloud_logging(os.environ["APP_ID"], logging.WARNING)
 
+
 # The same stuff as for usual External Applications
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    set_handlers(app, enabled_handler)
+    set_handlers(app, enabled_handler)  # pyright: ignore[reportArgumentType]
     yield
 
 
@@ -92,7 +91,7 @@ Here is the chat log from the room called "{conversation_name}" that you should 
 
 Now, please provide an insighful summary of the provided chat log and use human-readable time references for time related information.
 Use bullet points to list the most important facts and keep the summary concise and readable in roughly 30 seconds.
-""" # noqa: E501
+"""  # noqa: E501
 
 PROMPT_WINDOW = 16_000 - 4_000
 """Most models (proprietory and local) have an effective context length of 16000 tokens. We leave 4000 tokens for the
@@ -104,10 +103,7 @@ MAX_WORDS = int(PROMPT_WINDOW // 1.5)
 MAX_CHARACTERS = MAX_WORDS * 5
 
 
-
-jobstores= {
-    'default':SQLAlchemyJobStore(url=sqlite_url)
-}
+jobstores = {"default": SQLAlchemyJobStore(url=SQLITE_URI)}
 
 scheduler = BackgroundScheduler(jobstores=jobstores)
 scheduler.start()
@@ -223,9 +219,9 @@ def sched_process_request(message: talk_bot.TalkBotMessage, job_hash: str):
 
 def get_ctx_limited_messages(chat_messages: list[store.ChatMessages]) -> tuple[str, str | None]:
     """Get the last messages that fit into the context window of the model.
-        The second return is the cut-off datetime of the messages.
-    """
 
+    The second return is the cut-off datetime of the messages.
+    """
     msgs = ""
     length = 0
     cutoff = None
@@ -233,7 +229,7 @@ def get_ctx_limited_messages(chat_messages: list[store.ChatMessages]) -> tuple[s
     for i in range(len(chat_messages) - 1, -1, -1):
         msg = format_message(chat_messages[i])
         if (length := length + len(msg)) > MAX_CHARACTERS:
-            cutoff = str(chat_messages[max(0, i-1)].timestamp)
+            cutoff = str(chat_messages[max(0, i - 1)].timestamp)
             break
 
         msgs = msg + "\n" + msgs
@@ -258,17 +254,18 @@ def last_x_duration_process(message: talk_bot.TalkBotMessage, hduration: str = "
         )
         return
 
-    duration = timedelta(seconds=timelength_res.to_seconds(max_precision=0))
+    duration = timedelta(seconds=timelength_res.to_milliseconds(max_precision=0) * 0.001)
     current_time = datetime.now()
     start_time = current_time - duration
     start_time_str = start_time.strftime("%Y-%m-%d %H:%M:%S")
 
     try:
         # Get the chat messages from the database
-        chat_messages = store.ChatMessages \
-            .select() \
-            .where(store.ChatMessages.room_id == message.conversation_token) \
-            .where(store.ChatMessages.timestamp >= start_time_str)
+        chat_messages = (
+            store.ChatMessages.select()
+            .where(store.ChatMessages.room_id == message.conversation_token)
+            .where(store.ChatMessages.timestamp >= start_time_str)  # pyright: ignore[reportOperatorIssue]
+        )
 
         if chat_messages.count() == 0:
             BOT.send_message(f"```There was no conversation since i joined '{message.conversation_name}'```", message)
@@ -286,7 +283,9 @@ def last_x_duration_process(message: talk_bot.TalkBotMessage, hduration: str = "
             f" (All times are in {tz} timezone)*\n"
         )
         if cutoff:
-            ai_info += f"\n\n*Note: Messages before \"{cutoff}\" were not included in the summary due to the length limit.*"
+            ai_info += (
+                f'\n\n*Note: Messages before "{cutoff}" were not included in the summary due to the length limit.*'
+            )
         BOT.send_message(f"""**Summary:**\n{summary}\n\n{ai_info}""", message)
     except LLMException:
         error_handler("Could not get a summary from any large language model", message)
@@ -297,7 +296,8 @@ def is_numbers_and_colon(s: str):
 
 
 def help_message(message, text):
-    BOT.send_message(f"""
+    BOT.send_message(
+        f"""
 **{os.environ["APP_DISPLAY_NAME"]}**:
 *{text}*
 
@@ -321,7 +321,7 @@ Delete a {os.environ["APP_DISPLAY_NAME"]} job:
 Prints a help message:
     @summary help
 ```
-""", # noqa: E501
+""",  # noqa: E501
         message,
     )
 
@@ -418,7 +418,7 @@ def handle_command(message: talk_bot.TalkBotMessage):
                 message,
                 "Invalid time string provided, please use '30m' for 30 minutes, '3h40m' for 3 hours and 40 minutes,"
                 " '1d' for 1 day",
-            ) # noqa: E501
+            )  # noqa: E501
             return
 
         #########
@@ -454,7 +454,7 @@ def handle_command(message: talk_bot.TalkBotMessage):
                 # Parameters for the new job
                 new_job_hour = int(hour)
                 new_job_minute = int(minute)
-                new_job_hash = f"{conversation_token}_{hashlib.md5(f'{conversation_token}_{conversation_name}_{new_job_hour}_{new_job_minute}'.encode()).hexdigest()}" # noqa: E501, S324
+                new_job_hash = f"{conversation_token}_{hashlib.md5(f'{conversation_token}_{conversation_name}_{new_job_hour}_{new_job_minute}'.encode()).hexdigest()}"  # noqa: E501, S324
 
                 # Check if a similar job already exists
                 job_exists = False
@@ -472,7 +472,7 @@ def handle_command(message: talk_bot.TalkBotMessage):
                         job_minute = trigger.fields[trigger.FIELD_NAMES.index("minute")]
                         job_day_of_week = trigger.fields[trigger.FIELD_NAMES.index("day_of_week")]
 
-                        old_job_hash = f"{old_conversation_token}_{hashlib.md5(f'{old_conversation_token}_{conversation_name}_{job_hour}_{job_minute}'.encode()).hexdigest()}" # noqa: E501, S324
+                        old_job_hash = f"{old_conversation_token}_{hashlib.md5(f'{old_conversation_token}_{conversation_name}_{job_hour}_{job_minute}'.encode()).hexdigest()}"  # noqa: E501, S324
 
                         if isinstance(job_hour, BaseField):
                             job_hour = job_hour.expressions[0]
@@ -500,8 +500,8 @@ def handle_command(message: talk_bot.TalkBotMessage):
                         return
 
                     BOT.send_message(
-                        f"```Skip - A {os.environ['APP_DISPLAY_NAME']} job already exists at {job_hour}:{job_minute}:00 for"
-                        f" '{conversation_name}'```",
+                        f"```Skip - A {os.environ['APP_DISPLAY_NAME']} job already exists at {job_hour}:{job_minute}:00"
+                        f" for '{conversation_name}'```",
                         message,
                     )
                     return
@@ -525,8 +525,8 @@ def handle_command(message: talk_bot.TalkBotMessage):
                 if minute <= 9:
                     minute = f"0{minute}"
                 BOT.send_message(
-                    f"```New: Added a daily {os.environ['APP_DISPLAY_NAME']} task at {hour}:{minute}:00 for '{conversation_name}' with the"
-                    f" id: {job_hash}```",
+                    f"```New: Added a daily {os.environ['APP_DISPLAY_NAME']} task at {hour}:{minute}:00"
+                    f" for '{conversation_name}' with the id: {job_hash}```",
                     message,
                 )
             except Exception:
@@ -570,8 +570,7 @@ def handle_command(message: talk_bot.TalkBotMessage):
 
             if not job_id_to_delete:
                 BOT.send_message(
-                    "```No Job ID to delete given - use '@summary list' to get a list of scheduled"
-                    " job ids```",
+                    "```No Job ID to delete given - use '@summary list' to get a list of scheduled" " job ids```",
                     message,
                 )
                 return
