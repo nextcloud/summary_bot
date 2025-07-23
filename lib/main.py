@@ -513,12 +513,13 @@ def handle_command(message: talk_bot.TalkBotMessage):
                 ##########
 
                 scheduler.add_job(
-                    lambda: sched_process_request(message=message, job_hash=job_hash),
+                    sched_process_request,
                     "cron",
                     hour=hour,
                     minute=minute,
                     day_of_week="*",
                     id=job_hash,
+                    args=[message, job_hash],
                 )
                 if hour <= 9:
                     hour = f"0{hour}"
