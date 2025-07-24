@@ -8,6 +8,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
+## [1.1.5] – 2025-07-24
+
+### Fixed
+- Fix scheduled summary jobs #40 @lukasdotcom
+- Enable dependabot and other maintenance tasks #37 @kyteinsky
+- Add Github actions for reuse #36 @AndyScherzinger
+
+
 ## [1.1.4] – 2024-10-01
 
 ### Fixed
