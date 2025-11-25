@@ -288,7 +288,11 @@ def last_x_duration_process(message: talk_bot.TalkBotMessage, hduration: str = "
             )
         BOT.send_message(f"""**Summary:**\n{summary}\n\n{ai_info}""", message)
     except LLMException:
-        error_handler("Could not get a summary from any large language model", message)
+        error_handler(
+            "Error getting a summary from the LLM provider."
+            " Please see the server logs for more info, or use 'occ taskprocessing:list'.",
+            message,
+        )
 
 
 def is_numbers_and_colon(s: str):
