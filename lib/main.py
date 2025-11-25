@@ -133,10 +133,11 @@ def get_user_id_from_actor_id(actor_id: str) -> str:
     match = re.match(r"^users/(.*)$", actor_id)
     if match:
         return match.group(1)
-    return actor_id
+    # run the task as admin if no user found
+    return "admin"
 
 
-def is_task_type_available(user_id: str = "admin") -> bool:
+def is_task_type_available(user_id: str) -> bool:
     try:
         nc = NextcloudApp()
         nc.set_user(user_id)
