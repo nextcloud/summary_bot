@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2024 Nextcloud GmbH and Nextcloud contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
-FROM python:3.11-alpine
+FROM python:3.13-alpine
 
 COPY requirements.txt /
 RUN \
