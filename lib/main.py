@@ -649,4 +649,4 @@ def enabled_handler(enabled: bool, nc: NextcloudApp) -> str:
 
 
 if __name__ == "__main__":
-    run_app("main:APP", log_level="trace", reload=True)
+    run_app("main:APP", log_level="trace")
