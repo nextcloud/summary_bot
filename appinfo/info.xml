@@ -32,7 +32,7 @@ This ensures that users can quickly grasp the essence of discussions without rea
 	<bugs>https://github.com/nextcloud/summary_bot/issues</bugs>
 	<repository type="git">https://github.com/nextcloud/summary_bot.git</repository>
 	<dependencies>
-		<nextcloud min-version="30" max-version="31"/>
+		<nextcloud min-version="30" max-version="33"/>
 	</dependencies>
 	<external-app>
 		<docker-install>
