@@ -18,9 +18,6 @@ permissions:
   contents: read
   packages: write
 
-env:
-  APP_ID: translate2
-
 jobs:
   build_and_publish:
     runs-on: ubuntu-latest

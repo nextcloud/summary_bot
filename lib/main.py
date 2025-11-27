@@ -22,7 +22,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.cron.fields import BaseField
 from fastapi import Depends, FastAPI, Response
-from nc_py_api import Nextcloud, NextcloudApp, talk_bot
+from nc_py_api import NextcloudApp, talk_bot
 from nc_py_api.ex_app import atalk_bot_msg, run_app, set_handlers, setup_nextcloud_logging
 from timelength import TimeLength
 
@@ -45,7 +45,13 @@ SQLITE_URI = f"sqlite:///{database_path}"
 
 
 class LLMException(Exception):
-    pass
+    def __init__(self, message: str, task_id: int | None = None):
+        super().__init__(message)
+        self.task_id = task_id
+
+
+class UserIdException(Exception):
+    """Raised when the user ID cannot be extracted from the actor ID."""
 
 
 logging.basicConfig(
@@ -126,9 +132,25 @@ def is_valid_time(hour, minute):
     return bool(0 <= hour <= 23 and 0 <= minute <= 59)
 
 
-def is_task_type_available():
+def get_user_id_from_actor_id(actor_id: str) -> str:
+    """Extract the user ID from the actor ID.
+
+    Raises
+    ------
+    Exception
+        If the actor ID format is invalid and user ID cannot be extracted.
+
+    """
+    match = re.match(r"^users/(.*)$", actor_id)
+    if match:
+        return match.group(1)
+    raise UserIdException("Invalid actor ID format")
+
+
+def is_task_type_available(user_id: str) -> bool:
     try:
-        nc = Nextcloud()
+        nc = NextcloudApp()
+        nc.set_user(user_id)
         tasktype_result = nc.ocs(method="GET", path="/ocs/v2.php/taskprocessing/tasktypes")
     except Exception:
         error_handler("An error occurred while fetching the list of available tasktypes")
@@ -155,19 +177,27 @@ def validate_task_response(response) -> dict:
     return task
 
 
-def ocs_get_summary(messages_str: str, conversation_name: str) -> str:
-    nc = Nextcloud()
+def ocs_get_summary(messages_str: str, conversation_name: str, user_id: str) -> str:
+    nc = NextcloudApp()
+    nc.set_user(user_id)
     prompt = SUMMARY_TEMPLATE.format(messages=messages_str, conversation_name=conversation_name)
-    response = nc.ocs(
-        "POST",
-        "/ocs/v2.php/taskprocessing/schedule",
-        json={"type": "core:text2text", "appId": os.environ["APP_ID"], "input": {"input": prompt}},
-    )
+
+    try:
+        response = nc.ocs(
+            "POST",
+            "/ocs/v2.php/taskprocessing/schedule",
+            json={"type": "core:text2text", "appId": os.environ["APP_ID"], "input": {"input": prompt}},
+        )
+    except Exception as e:
+        raise LLMException("Failed to create Nextcloud TaskProcessing task") from e
 
     try:
         task = validate_task_response(response)
         logger.debug("Task with ID %s created", task["id"])
+    except Exception as e:
+        raise LLMException("Failed to create Nextcloud TaskProcessing task") from e
 
+    try:
         i = 0
         # wait for 30 minutes
         while task["status"] != "STATUS_SUCCESSFUL" and task["status"] != "STATUS_FAILED" and i < 60 * 6:
@@ -177,13 +207,13 @@ def ocs_get_summary(messages_str: str, conversation_name: str) -> str:
             task = validate_task_response(response)
             logger.debug("Task (%s) status: %s", task["id"], task["status"])
     except Exception as e:
-        raise LLMException("Failed to create Nextcloud TaskProcessing task") from e
+        raise LLMException("Failed to create Nextcloud TaskProcessing task", task_id=task["id"]) from e
 
     if task["status"] != "STATUS_SUCCESSFUL":
-        raise LLMException("Nextcloud TaskProcessing Task failed: " + task["status"])
+        raise LLMException("Nextcloud TaskProcessing Task failed: " + task["status"], task_id=task["id"])
 
     if "output" not in task or "output" not in task["output"]:
-        raise LLMException("No output in Nextcloud TaskProcessing task")
+        raise LLMException("No output in Nextcloud TaskProcessing task", task_id=task["id"])
 
     return task["output"]["output"]
 
@@ -241,8 +271,12 @@ def get_ctx_limited_messages(chat_messages: list[store.ChatMessages]) -> tuple[s
 
 
 def last_x_duration_process(message: talk_bot.TalkBotMessage, hduration: str = "1d"):
-    if not is_task_type_available():
-        BOT.send_message("```The required task type to generate the summary is not available```", message)
+    try:
+        if not is_task_type_available(get_user_id_from_actor_id(message.actor_id)):
+            BOT.send_message("```The required task type to generate the summary is not available```", message)
+            return
+    except UserIdException:
+        BOT.send_message("```Anonymous users are not supported for summary generation```", message)
         return
 
     timelength_res = TimeLength(hduration)
@@ -276,7 +310,11 @@ def last_x_duration_process(message: talk_bot.TalkBotMessage, hduration: str = "
 
     (formatted_chat_messages, cutoff) = get_ctx_limited_messages(chat_messages)
     try:
-        summary = ocs_get_summary(formatted_chat_messages, message.conversation_name)
+        summary = ocs_get_summary(
+            formatted_chat_messages,
+            message.conversation_name,
+            get_user_id_from_actor_id(message.actor_id),
+        )
         tz = tzlocal.get_localzone() or "server's"
         ai_info = (
             "\u2139\ufe0f *This output was generated by AI. Make sure to double-check."
@@ -287,8 +325,28 @@ def last_x_duration_process(message: talk_bot.TalkBotMessage, hduration: str = "
                 f'\n\n*Note: Messages before "{cutoff}" were not included in the summary due to the length limit.*'
             )
         BOT.send_message(f"""**Summary:**\n{summary}\n\n{ai_info}""", message)
-    except LLMException:
-        error_handler("Could not get a summary from any large language model", message)
+    except LLMException as e:
+        BOT.send_message(
+            "```Failed to generate summary: LLM provider error. Contact the admin"
+            + (
+                " to check the server logs or use 'occ taskprocessing:task:list'```" if e.task_id is None
+                else f" to check the server logs or use 'occ taskprocessing:task:get {e.task_id}'```"
+            ),
+            message,
+        )
+        error_handler(
+            "Error getting a summary from the LLM provider."
+            " Please see the server logs for more info, or use 'occ taskprocessing:list'.",
+            message,
+        )
+    except UserIdException:
+        BOT.send_message("```Anonymous users are not supported for summary generation```", message)
+    except Exception:
+        BOT.send_message(
+            "```Failed to generate summary: LLM provider error. Contact the admin to check the server logs```",
+            message,
+        )
+        error_handler("Error getting a summary from the LLM provider", message)
 
 
 def is_numbers_and_colon(s: str):
@@ -645,4 +703,4 @@ def enabled_handler(enabled: bool, nc: NextcloudApp) -> str:
 
 
 if __name__ == "__main__":
-    run_app("main:APP", log_level="trace", reload=True)
+    run_app("main:APP", log_level="trace")
