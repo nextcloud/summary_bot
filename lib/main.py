@@ -50,6 +50,10 @@ class LLMException(Exception):
         self.task_id = task_id
 
 
+class UserIdException(Exception):
+    """Raised when the user ID cannot be extracted from the actor ID."""
+
+
 logging.basicConfig(
     level=logging.WARNING,
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -129,12 +133,18 @@ def is_valid_time(hour, minute):
 
 
 def get_user_id_from_actor_id(actor_id: str) -> str:
-    """Extract the user ID from the actor ID."""
+    """Extract the user ID from the actor ID.
+
+    Raises
+    ------
+    Exception
+        If the actor ID format is invalid and user ID cannot be extracted.
+
+    """
     match = re.match(r"^users/(.*)$", actor_id)
     if match:
         return match.group(1)
-    # run the task as admin if no user found
-    return "admin"
+    raise UserIdException("Invalid actor ID format")
 
 
 def is_task_type_available(user_id: str) -> bool:
@@ -261,8 +271,12 @@ def get_ctx_limited_messages(chat_messages: list[store.ChatMessages]) -> tuple[s
 
 
 def last_x_duration_process(message: talk_bot.TalkBotMessage, hduration: str = "1d"):
-    if not is_task_type_available(get_user_id_from_actor_id(message.actor_id)):
-        BOT.send_message("```The required task type to generate the summary is not available```", message)
+    try:
+        if not is_task_type_available(get_user_id_from_actor_id(message.actor_id)):
+            BOT.send_message("```The required task type to generate the summary is not available```", message)
+            return
+    except UserIdException:
+        BOT.send_message("```Anonymous users are not supported for summary generation```", message)
         return
 
     timelength_res = TimeLength(hduration)
@@ -325,6 +339,14 @@ def last_x_duration_process(message: talk_bot.TalkBotMessage, hduration: str = "
             " Please see the server logs for more info, or use 'occ taskprocessing:list'.",
             message,
         )
+    except UserIdException:
+        BOT.send_message("```Anonymous users are not supported for summary generation```", message)
+    except Exception:
+        BOT.send_message(
+            "```Failed to generate summary: LLM provider error. Contact the admin to check the server logs```",
+            message,
+        )
+        error_handler("Error getting a summary from the LLM provider", message)
 
 
 def is_numbers_and_colon(s: str):
