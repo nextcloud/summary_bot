@@ -1,0 +1,135 @@
+repository_link: https://github.com/nextcloud/summary_bot
+title: Change Log
+description: All notable changes to this project will be documented in this file.
+markdown_preamble: |-
+  <!--
+    - SPDX-FileCopyrightText: 2024 Nextcloud GmbH and Nextcloud contributors
+    - SPDX-License-Identifier: AGPL-3.0-or-later
+  -->
+  # Change Log
+  All notable changes to this project will be documented in this file.
+
+  The format is based on [Keep a Changelog](http://keepachangelog.com/)
+  and this project adheres to [Semantic Versioning](http://semver.org/).
+release_agent:
+  ignore_commits:
+  - author: "^pre-commit-ci\\[bot\\]$"
+  - author: "^Nextcloud-bot$"
+  - email: bot@nextcloud.com
+  - author: "^dependabot\\[bot\\]$"
+  - message: "^chore\\(changelog\\):"
+entries:
+- version: 1.1.6
+  release_date: '2025-11-27'
+  sections:
+  - name: Changed
+    items:
+    - text: improve LLM taskproc error message
+      authors:
+      - kyteinsky
+      issue_number: 43
+    - text: upgrade to python3.13 and nc_py_api to 0.23.0
+      authors:
+      - kyteinsky
+      issue_number: 43
+    - text: bump max supported NC to 33
+      authors:
+      - kyteinsky
+      issue_number: 43
+  - name: Fixed
+    items:
+    - text: do not reload on code change
+      authors:
+      - kyteinsky
+      issue_number: 43
+    - text: add user_id to taskproc OCS calls to avoid 401 resp
+      authors:
+      - kyteinsky
+      issue_number: 43
+    - text: use "admin" as fallback if no user is found
+      authors:
+      - kyteinsky
+      issue_number: 43
+    - text: disallow anon users to request summaries
+      authors:
+      - kyteinsky
+      issue_number: 43
+- version: 1.1.5
+  release_date: '2025-07-24'
+  sections:
+  - name: Fixed
+    items:
+    - text: Fix scheduled summary jobs
+      authors:
+      - lukasdotcom
+      issue_number: 40
+    - text: Enable dependabot and other maintenance tasks
+      authors:
+      - kyteinsky
+      issue_number: 37
+    - text: Add Github actions for reuse
+      authors:
+      - AndyScherzinger
+      issue_number: 36
+- version: 1.1.4
+  release_date: '2024-10-01'
+  sections:
+  - name: Fixed
+    items:
+    - text: Enable appstore-build-publish on nextcloud-releases
+      authors: []
+      issue_number:
+- version: 1.1.3
+  release_date: '2024-10-01'
+  sections:
+  - name: Fixed
+    items:
+    - text: Add files required for nc release
+      authors: []
+      issue_number:
+- version: 1.1.2
+  release_date: '2024-09-30'
+  sections:
+  - name: Fixed
+    items:
+    - text: Preserve pip cache on code change
+      authors: []
+      issue_number:
+- version: 1.1.1
+  release_date: '2024-09-30'
+  sections:
+  - name: Fixed
+    items:
+    - text: Timezone handling
+      authors: []
+      issue_number:
+    - text: Docker build container repo url
+      authors: []
+      issue_number:
+    - text: Docker runs-only-on github runners
+      authors: []
+      issue_number:
+    - text: Minor fixes
+      authors: []
+      issue_number:
+- version: 1.1.0
+  release_date: '2024-09-18'
+  sections:
+  - name: Added
+    items:
+    - text: Add on-demand execution command
+      authors: []
+      issue_number:
+  - name: Changed
+    items:
+    - text: Use TaskProcessing instead of TextProcessing
+      authors: []
+      issue_number:
+- version: 1.0.0
+  release_date: '2024-08-02'
+  sections:
+  - name: Added
+    items:
+    - text: The app
+      authors: []
+      issue_number:
