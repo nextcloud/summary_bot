@@ -9,6 +9,7 @@ import hashlib
 import logging
 import os
 import re
+import sys
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor
@@ -121,11 +122,58 @@ executor = ThreadPoolExecutor(max_workers=10)
 available_params = ["add", "list", "delete", "help"]
 
 
+def _log_send_result(context: str, result):
+    """Log the response from BOT.send_message. Returns the result unchanged."""
+    try:
+        response, ref = result if isinstance(result, tuple) else (result, None)
+        status = getattr(response, "status_code", None)
+        if status is None or not (200 <= status < 300):
+            body = ""
+            try:
+                body = response.text[:500] if hasattr(response, "text") else ""
+            except Exception:
+                body = "<unavailable>"
+            logger.error(
+                "send_message failed [%s]: status=%s ref=%s body=%s",
+                context, status, ref, body,
+            )
+        else:
+            logger.debug("send_message ok [%s]: status=%s ref=%s", context, status, ref)
+    except Exception:
+        logger.exception("send_message result logging failed [%s]", context)
+    return result
+
+
+def send_msg(text: str, message: talk_bot.TalkBotMessage, context: str = ""):
+    """Send a message via BOT and log the HTTP result. Never raises."""
+    try:
+        result = BOT.send_message(text, message)
+        return _log_send_result(context or "send", result)
+    except Exception:
+        logger.exception("BOT.send_message raised [%s]", context)
+        return None
+
+
+def _executor_done(context: str):
+    def _cb(fut):
+        exc = fut.exception()
+        if exc is not None:
+            logger.error("Executor task [%s] raised", context, exc_info=exc)
+    return _cb
+
+
 def error_handler(custom_err_msg: str, message: talk_bot.TalkBotMessage | None = None):
-    logger.error("An error occurred: %s", custom_err_msg)
-    traceback.print_exc()
+    # Capture the currently-handled exception (if any) so we can include it in both
+    # the server-side log and the message sent back to the user in the chat room.
+    exc = sys.exc_info()[1]
+    logger.error("An error occurred: %s", custom_err_msg, exc_info=exc)
+    if exc is not None:
+        exc_text = "".join(traceback.format_exception(exc)).rstrip()
+        chat_body = f"```\n{custom_err_msg}\n\n{exc_text}\n```"
+    else:
+        chat_body = f"```{custom_err_msg}```"
     if message:
-        BOT.send_message(f"```{custom_err_msg}```", message)
+        send_msg(chat_body, message, context="error_handler")
 
 
 def is_valid_time(hour, minute):
@@ -273,10 +321,18 @@ def get_ctx_limited_messages(chat_messages: list[store.ChatMessages]) -> tuple[s
 def last_x_duration_process(message: talk_bot.TalkBotMessage, hduration: str = "1d"):
     try:
         if not is_task_type_available(get_user_id_from_actor_id(message.actor_id)):
-            BOT.send_message("```The required task type to generate the summary is not available```", message)
+            send_msg(
+                "```The required task type to generate the summary is not available```",
+                message,
+                context="tasktype unavailable",
+            )
             return
     except UserIdException:
-        BOT.send_message("```Anonymous users are not supported for summary generation```", message)
+        send_msg(
+            "```Anonymous users are not supported for summary generation```",
+            message,
+            context="anonymous user (pre-check)",
+        )
         return
 
     timelength_res = TimeLength(hduration)
@@ -302,7 +358,11 @@ def last_x_duration_process(message: talk_bot.TalkBotMessage, hduration: str = "
         )
 
         if chat_messages.count() == 0:
-            BOT.send_message(f"```There was no conversation since i joined '{message.conversation_name}'```", message)
+            send_msg(
+                f"```There was no conversation since i joined '{message.conversation_name}'```",
+                message,
+                context="no messages in window",
+            )
             return
     except Exception:
         error_handler("Error occured while fetching the messages from the database", message)
@@ -324,15 +384,16 @@ def last_x_duration_process(message: talk_bot.TalkBotMessage, hduration: str = "
             ai_info += (
                 f'\n\n*Note: Messages before "{cutoff}" were not included in the summary due to the length limit.*'
             )
-        BOT.send_message(f"""**Summary:**\n{summary}\n\n{ai_info}""", message)
+        send_msg(f"""**Summary:**\n{summary}\n\n{ai_info}""", message, context="summary result")
     except LLMException as e:
-        BOT.send_message(
+        send_msg(
             "```Failed to generate summary: LLM provider error. Contact the admin"
             + (
                 " to check the server logs or use 'occ taskprocessing:task:list'```" if e.task_id is None
                 else f" to check the server logs or use 'occ taskprocessing:task:get {e.task_id}'```"
             ),
             message,
+            context="LLMException",
         )
         error_handler(
             "Error getting a summary from the LLM provider."
@@ -340,11 +401,16 @@ def last_x_duration_process(message: talk_bot.TalkBotMessage, hduration: str = "
             message,
         )
     except UserIdException:
-        BOT.send_message("```Anonymous users are not supported for summary generation```", message)
+        send_msg(
+            "```Anonymous users are not supported for summary generation```",
+            message,
+            context="anonymous user (post-check)",
+        )
     except Exception:
-        BOT.send_message(
+        send_msg(
             "```Failed to generate summary: LLM provider error. Contact the admin to check the server logs```",
             message,
+            context="summary unknown error",
         )
         error_handler("Error getting a summary from the LLM provider", message)
 
@@ -354,7 +420,7 @@ def is_numbers_and_colon(s: str):
 
 
 def help_message(message, text):
-    BOT.send_message(
+    send_msg(
         f"""
 **{os.environ["APP_DISPLAY_NAME"]}**:
 *{text}*
@@ -381,6 +447,7 @@ Prints a help message:
 ```
 """,  # noqa: E501
         message,
+        context="help_message",
     )
 
 
@@ -429,8 +496,8 @@ def store_message(tmsg: talk_bot.TalkBotMessage):
         case "Activity":
             try:
                 message = render_activity_message(tmsg)
-            except KeyError:
-                logger.warning("KeyError in parsing the activity message: %s", tmsg.object_content)
+            except KeyError as e:
+                logger.warning("KeyError in parsing the activity message: %s", tmsg.object_content, exc_info=e)
                 return
             except NotImplementedError:
                 return
@@ -447,8 +514,8 @@ def store_message(tmsg: talk_bot.TalkBotMessage):
             actor=tmsg.actor_display_name,
             message=message,
         )
-    except Exception:
-        error_handler("Error occured while storing the message")
+    except Exception as e:
+        error_handler(f"Error occured while storing the message: {e}")
 
 
 def format_message(message: store.ChatMessages) -> str:
@@ -471,7 +538,11 @@ def handle_command(message: talk_bot.TalkBotMessage):
 
     if cmd_text.strip() == "@summary":
         # Create a summary from last 24 hours of chat messages
-        BOT.send_message("```Creating a summary from last 24 hours of chat messages```", message)
+        send_msg(
+            f"```Creating a summary from last 24 hours of chat messages ({datetime.now():%H:%M:%S})```",
+            message,
+            context="@summary ack",
+        )
         last_x_duration_process(message)
     elif cmd_text.startswith("@summary "):
         param = cmd_text.split(" ")[1]
@@ -479,7 +550,11 @@ def handle_command(message: talk_bot.TalkBotMessage):
             if TimeLength(param).result.success:
                 # Create a summary from last provided duration of chat messages ("30m" for 30 minutes, "3h40m"
                 # for 3 hours and 40 minutes, "1d" for 1 day):
-                BOT.send_message(f"```Creating a summary from last {param} of chat messages```", message)
+                send_msg(
+                    f"```Creating a summary from last {param} of chat messages ({datetime.now():%H:%M:%S})```",
+                    message,
+                    context=f"@summary {param} ack",
+                )
                 last_x_duration_process(message, param)
                 return
 
@@ -499,7 +574,7 @@ def handle_command(message: talk_bot.TalkBotMessage):
             hour_minute = cmd_text.split(" ")[2]
 
             if not is_numbers_and_colon(hour_minute):
-                BOT.send_message("```Usage: @summary <hour>:<minute>```", message)
+                send_msg("```Usage: @summary <hour>:<minute>```", message, context="add usage")
                 return
 
             try:
@@ -509,14 +584,19 @@ def handle_command(message: talk_bot.TalkBotMessage):
                     hour = int(hour)
                     minute = int(minute)
                 except ValueError:
-                    BOT.send_message("```Hour and/or minute(s) are not integers.```", message)
+                    send_msg(
+                        "```Hour and/or minute(s) are not integers.```",
+                        message,
+                        context="add non-int",
+                    )
                     return
 
                 if not is_valid_time(hour, minute):
-                    BOT.send_message(
+                    send_msg(
                         "```Its not a valid time - please use @summary hour:minute to schedule the"
                         " bot for execution```",
                         message,
+                        context="add invalid time",
                     )
                     return
 
@@ -568,10 +648,11 @@ def handle_command(message: talk_bot.TalkBotMessage):
                     if job_hour == -1 or job_minute == -1:
                         return
 
-                    BOT.send_message(
+                    send_msg(
                         f"```Skip - A {os.environ['APP_DISPLAY_NAME']} job already exists at {job_hour}:{job_minute}:00"
                         f" for '{conversation_name}'```",
                         message,
+                        context="add job duplicate",
                     )
                     return
 
@@ -594,10 +675,11 @@ def handle_command(message: talk_bot.TalkBotMessage):
                     hour = f"0{hour}"
                 if minute <= 9:
                     minute = f"0{minute}"
-                BOT.send_message(
+                send_msg(
                     f"```New: Added a daily {os.environ['APP_DISPLAY_NAME']} task at {hour}:{minute}:00"
                     f" for '{conversation_name}' with the id: {job_hash}```",
                     message,
+                    context="add job created",
                 )
             except Exception:
                 error_handler("Error occured while adding the job", message)
@@ -630,18 +712,20 @@ def handle_command(message: talk_bot.TalkBotMessage):
 
             job_list_str = "\n".join(job_list)
 
-            BOT.send_message(f"```Scheduled Jobs:\n{job_list_str}\n```", message)
+            send_msg(f"```Scheduled Jobs:\n{job_list_str}\n```", message, context="list jobs")
 
         elif param == "delete":
             try:
                 job_id_to_delete = cmd_text.split(" ")[2]
-            except Exception:
+            except IndexError:
+                # user typed "@summary delete" without a job id
                 job_id_to_delete = False
 
             if not job_id_to_delete:
-                BOT.send_message(
+                send_msg(
                     "```No Job ID to delete given - use '@summary list' to get a list of scheduled" " job ids```",
                     message,
+                    context="delete missing id",
                 )
                 return
 
@@ -661,16 +745,18 @@ def handle_command(message: talk_bot.TalkBotMessage):
                         scheduler.remove_job(job_id_to_delete)
                         job_deleted = True
             else:
-                BOT.send_message(
+                send_msg(
                     "```You are not allowed to do that - you need to be member of the room```",
                     message,
+                    context="delete not member",
                 )
                 return
 
             if job_deleted:
-                BOT.send_message(
+                send_msg(
                     f"```Deleted Job {job_id_to_delete} from '{conversation_name}'```",
                     message,
+                    context="delete ok",
                 )
                 return
         else:
@@ -690,10 +776,12 @@ async def summary_bot(
         or not message.object_media_type.startswith("text/")
         or not bot_mention_regex.match(msg_text.strip())
     ):
-        executor.submit(store_message, message)
+        fut = executor.submit(store_message, message)
+        fut.add_done_callback(_executor_done("store_message"))
         return Response()
 
-    executor.submit(handle_command, message)
+    fut = executor.submit(handle_command, message)
+    fut.add_done_callback(_executor_done("handle_command"))
     return Response()
 
 
