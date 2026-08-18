@@ -8,6 +8,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](http://keepachangelog.com/)
 and this project adheres to [Semantic Versioning](http://semver.org/).
 
+## 1.1.8 - 2026-08-19
+
+### Changed
+- add NC 35 support ([#51](https://github.com/nextcloud/summary_bot/pull/51)) @kyteinsky
+
+### Fixed
+- improved error logging ([#52](https://github.com/nextcloud/summary_bot/pull/52)) @kyteinsky
+
+
 ## 1.1.7 - 2026-04-16
 
 ### Changed
