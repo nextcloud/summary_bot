@@ -308,7 +308,7 @@ def last_x_duration_process(message: talk_bot.TalkBotMessage, hduration: str = "
         error_handler("Error occured while fetching the messages from the database", message)
         return
 
-    (formatted_chat_messages, cutoff) = get_ctx_limited_messages(chat_messages)
+    (formatted_chat_messages, cutoff) = get_ctx_limited_messages(list(chat_messages))
     try:
         summary = ocs_get_summary(
             formatted_chat_messages,
@@ -385,8 +385,13 @@ Prints a help message:
 
 
 def render_activity_message(message: talk_bot.TalkBotMessage) -> str:
-    msg = message.object_content["message"]
-    params = message.object_content["parameters"]
+    content = message.object_content
+    if "message" not in content:
+        raise KeyError("message")
+    if "parameters" not in content:
+        raise KeyError("parameters")
+    msg = content["message"]
+    params = content["parameters"]
 
     if msg == "Someone voted on the poll {poll}":
         # not important for the summary
@@ -396,14 +401,14 @@ def render_activity_message(message: talk_bot.TalkBotMessage) -> str:
         return f"{message.actor_display_name} uploaded a file named {params['file']['name']}"
 
     if msg == "{object}":
-        if message.object_content["parameters"]["object"]["type"] == "talk-poll":
+        if params["object"]["type"] == "talk-poll":
             return f"{message.actor_display_name} created a poll titled {params['object']['name']}"
         return f"{message.actor_display_name} created a {params['object']['type']} titled {params['object']['name']}"
 
     for key in ("user", "user1", "user2", "user3", "user4", "user5", "actor", "poll"):
         if f"{{{key}}}" not in msg:
             continue
-        msg = msg.replace(f"{{{key}}}", message.object_content["parameters"][key]["name"])
+        msg = msg.replace(f"{{{key}}}", params[key]["name"])
 
     return msg
 
@@ -418,6 +423,8 @@ def store_message(tmsg: talk_bot.TalkBotMessage):
             message = f"{tmsg.actor_display_name} removed Summary bot from the conversation"
         case "Create" if tmsg.object_media_type.startswith("text/") and not tmsg.actor_id.startswith("bot"):
             # text messages which are not from other bots
+            if "message" not in tmsg.object_content:
+                return
             message = tmsg.object_content["message"]
         case "Activity":
             try:
@@ -458,12 +465,16 @@ def handle_command(message: talk_bot.TalkBotMessage):
     conversation_token = message.conversation_token
     conversation_name = message.conversation_name
 
-    if message.object_content["message"].strip() == "@summary":
+    if "message" not in message.object_content:
+        return
+    cmd_text = message.object_content["message"]
+
+    if cmd_text.strip() == "@summary":
         # Create a summary from last 24 hours of chat messages
         BOT.send_message("```Creating a summary from last 24 hours of chat messages```", message)
         last_x_duration_process(message)
-    elif message.object_content["message"].startswith("@summary "):
-        param = message.object_content["message"].split(" ")[1]
+    elif cmd_text.startswith("@summary "):
+        param = cmd_text.split(" ")[1]
         if param not in available_params:
             if TimeLength(param).result.success:
                 # Create a summary from last provided duration of chat messages ("30m" for 30 minutes, "3h40m"
@@ -485,7 +496,7 @@ def handle_command(message: talk_bot.TalkBotMessage):
         #
         #########
         if param == "add":
-            hour_minute = message.object_content["message"].split(" ")[2]
+            hour_minute = cmd_text.split(" ")[2]
 
             if not is_numbers_and_colon(hour_minute):
                 BOT.send_message("```Usage: @summary <hour>:<minute>```", message)
@@ -623,7 +634,7 @@ def handle_command(message: talk_bot.TalkBotMessage):
 
         elif param == "delete":
             try:
-                job_id_to_delete = message.object_content["message"].split(" ")[2]
+                job_id_to_delete = cmd_text.split(" ")[2]
             except Exception:
                 job_id_to_delete = False
 
@@ -672,11 +683,12 @@ async def summary_bot(
     message: Annotated[talk_bot.TalkBotMessage, Depends(atalk_bot_msg)],
 ):
     bot_mention_regex = re.compile("^@summary$|^@summary\\s.*", re.IGNORECASE)
+    msg_text = message.object_content.get("message", "")
     # store the message if its not a command
     if (
         message.message_type != "Create"
         or not message.object_media_type.startswith("text/")
-        or not bot_mention_regex.match(message.object_content["message"].strip())
+        or not bot_mention_regex.match(msg_text.strip())
     ):
         executor.submit(store_message, message)
         return Response()
