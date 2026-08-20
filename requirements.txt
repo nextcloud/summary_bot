@@ -1,5 +1,5 @@
 apscheduler
-nc_py_api[app]>=0.23.0
+nc_py_api[app]>=0.30.2
 peewee
 sqlalchemy
 timelength
